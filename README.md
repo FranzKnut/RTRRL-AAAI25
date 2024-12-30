@@ -1,6 +1,6 @@
 # Real-Time Recurrent Reinforcement Learning
 
-AAAI Submission #4116
+Code Appendix for the Paper "Real-Time Recurrent Reinforcement Learning" accepted for AAAI 2025.
 
 ## Install
 
