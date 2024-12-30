@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "rtrrl"
+version = "0.1.0"
+description = ""
+authors = ["Anonymous <anon@anon.anon>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+gymnax = "^0.0.8"
+brax = "^0.10.4"
+plotly = "^5.22.0"
+flax = "^0.8.4"
+dacite = "^1.8.1"
+simple-parsing = "^0.1.5"
+distrax = "^0.1.5"
+tqdm = "^4.66.4"
+optax = "^0.2.2"
+pyhopper = "^1.2.3"
+mujoco-mjx = "^3.1.6"
+poethepoet = "^0.26.1"
+popjym = {git = "https://github.com/EdanToledo/popjym.git"}
+flashbax = "^0.1.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poe.tasks]
+install_jax_cuda12 = "pip install --upgrade \"jax[cuda12_pip]\" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
