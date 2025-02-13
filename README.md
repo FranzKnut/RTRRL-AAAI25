@@ -13,6 +13,10 @@ Code Appendix for the Paper "Real-Time Recurrent Reinforcement Learning" accepte
 poetry run python rtrrl.py
 ```
 
+## Algorithm
+
+![RTRRL steps](figures/RTRRL_steps.png)
+
 ## Hyperparameters
 | Symbol      | Description                          | Default Value |
 | ----------- | ------------------------------------ | ------------- |
@@ -26,12 +30,14 @@ poetry run python rtrrl.py
 | $\lambda_R$ | Lambda for RNN eligibility trace.    | 0.99          |
 
 
+![3 step diagram](figures/Time_line.png)
+
 ## Configurables
 This is an incomplete table of configurables.
 Run `poetry run python rtrrl.py --help` to find out more.
 
 |Name | Description | Default Value |
-|-|-|-|
+| --- | ------- | -------- |
 |debug| Enables debugging functionality. |False|
 |env_name | Environment ID as defined by `gymnax` | 'CartPole-v1' |
 |obs_mask| Allows masking of observation. Allowed values are None, 'even', 'odd', 'first_half' or a List of indices. | None|
@@ -58,3 +64,5 @@ Run `poetry run python rtrrl.py --help` to find out more.
 |trace_mode| Type of eligibility trace. 'accumulate' or 'dutch'  | 'accumulate'|
 |wiring| Specify wiring of RNN. See `modles/jax/wirings_jax.py` for available options. | 'fully_connected'|
 |dt| Determines number of steps for forward Euler. e.g. 0.2 results in 5 steps. | 1|
+
+

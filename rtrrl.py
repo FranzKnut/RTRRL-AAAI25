@@ -51,7 +51,7 @@ class RTRRLParams:
     render_steps: int = 200
 
     # Logging
-    logging: str = "aim"
+    logging: str | None = None
     log_repo: str | None = None
     save_model: bool = False
     log_norms: bool = True

@@ -8,7 +8,7 @@ from models.neural_networks import FADense
 import numpy as np
 
 
-@partial(jax.jit, static_argnames=('trace_mode', 'gamma_lambda'))
+@partial(jax.jit, static_argnames=('trace_mode'))
 def trace_update(grads, z, gamma_lambda, trace_mode: str = 'accumulate', alpha=None, _I=1):
     """Update the eligibility trace. Also compute the gradients if d is given.
 
