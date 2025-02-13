@@ -1,5 +1,5 @@
 from envs.environments import EnvironmentParams
-from rtrrl2 import RTRRLParams, train_rtrrl
+from rtrrl import RTRRLParams, train_rtrrl
 
 # jax.config.update('jax_disable_jit', True)
 
