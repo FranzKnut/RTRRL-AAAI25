@@ -1,0 +1,15 @@
+env_params:
+  env_name: "brax-ant"
+  batch_size: 128
+trace_mode: "accumulate"
+gamma: 0.99
+lambda_v: 0.9
+lambda_pi: 0.9
+lambda_rnn: 0.9
+eta_pi: 1e-1
+eta_f: 1
+steps: 10
+optimizer_params_td:
+  learning_rate: 1e-3
+optimizer_params_rnn:
+  learning_rate: 1e-4

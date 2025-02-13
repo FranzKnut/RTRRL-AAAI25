@@ -1,16 +1,38 @@
 # Real-Time Recurrent Reinforcement Learning
 
-Code Appendix for the Paper "Real-Time Recurrent Reinforcement Learning" accepted for AAAI 2025.
+Code Appendix for the Paper "[Real-Time Recurrent Reinforcement Learning](https://arxiv.org/abs/2311.04830)" accepted for AAAI 2025.
 
 ## Install
 
 1. Install Poetry: https://python-poetry.org/docs/#installation
 2. Install dependencies using `poetry install`
+3. Launch poetry shell: `poetry shell`
 
 ## Run
 
 ```
-poetry run python rtrrl.py
+python rtrrl.py
+```
+
+## Loggging
+
+You can log results using [`aim`](https://aimstack.readthedocs.io/en/latest/index.html) or [`wandb`](https://wandb.ai/). By default no logging framework is installed.
+
+After installing the respective package, you can enable logging by providing the `--logging` argument. 
+
+```
+pip install aim
+python rtrrl.py --logging aim
+```
+
+## CUDA support
+
+A GPU can speed up training when using large batch sizes but will slow it down for smaller ones. 
+
+Make sure to install the CUDA version of `jax` and `jaxlib`. 
+
+```
+    pip install jax[cuda]
 ```
 
 ## Algorithm
@@ -35,6 +57,12 @@ poetry run python rtrrl.py
 ## Configurables
 This is an incomplete table of configurables.
 Run `poetry run python rtrrl.py --help` to find out more.
+
+There is a preset for `brax` environments that can be used by providing the config path:
+
+```
+python rtrrl.py --config_path configs/brax.yml
+```
 
 |Name | Description | Default Value |
 | --- | ------- | -------- |

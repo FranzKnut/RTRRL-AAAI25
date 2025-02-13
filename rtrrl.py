@@ -6,7 +6,7 @@ from pprint import pprint
 from typing import Tuple
 
 import numpy as np
-from simple_parsing import ArgumentParser
+import simple_parsing
 from tqdm import trange
 
 from chex import PRNGKey
@@ -27,8 +27,13 @@ from optimizers import OptimizerConfig, make_optimizer
 from models.jax_util import sigmoid_between, zeros_like_tree
 
 # jax.config.update('jax_debug_nans', True)
-# jax.config.update("jax_log_compiles", True)
 # jax.config.update('jax_platform_name', 'cpu')
+
+# Uncomment for faster compilation using persistent cache.
+jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", 1000000)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_enable_xla_caches", "xla_gpu_per_fusion_autotune_cache_dir")
 
 
 @dataclass(unsafe_hash=True)
@@ -364,9 +369,9 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
     # Logging preparation
     logger["best_eval_reward"] = -jnp.inf
     render_every = (args.render_every_evals or 0) * (args.eval_every or 0)
-    assert (
-        render_every > 0 or not args.env_params.render
-    ), "render_every_evals and eval_every must be > 0 if render is True"
+    assert render_every > 0 or not args.env_params.render, (
+        "render_every_evals and eval_every must be > 0 if render is True"
+    )
 
     def eval_step(_params, carry, _=None):
         """Step function for scan."""
@@ -412,8 +417,8 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
         return jnp.mean(total_reward), env_states
 
     # Set up scan body
-
-    def step_fn(_carry, _, delayed=False):
+    @jax.jit
+    def step_fn(_carry, _):
         print("Tracing step_fn")
         (
             params,
@@ -784,9 +789,7 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
 
 if __name__ == "__main__":
     # Parse hparams from cmd line
-    parser = ArgumentParser()
-    parser.add_arguments(RTRRLParams, dest="hparams")
-    hparams: RTRRLParams = parser.parse_args().hparams
+    hparams: RTRRLParams = simple_parsing.parse(RTRRLParams, add_config_path_arg=True)
 
     # Name run
     run_name = hparams.env_params.env_name

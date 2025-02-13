@@ -6,27 +6,16 @@ import optax
 
 @dataclass(frozen=True)
 class OptimizerConfig:
-    """Class representing the parameters for an optimizer.
+    """Class representing the parameters for an optimizer."""
 
-    Attributes:
-        opt_name (str): The name of the optimizer.
-        learning_rate (float): The learning rate for the optimizer.
-        kwargs (dict): Additional keyword arguments for the optimizer.
-        decay_type (str): The type of decay for the learning rate.
-        lr_kwargs (dict): Additional keyword arguments for the learning rate decay.
-        weight_decay (float): The weight decay for the optimizer.
-        gradient_clip (float): The value to clip the gradients.
-        multi_step (int): number of steps to accumulate.
-    """
-
-    opt_name: str = "adam"
-    learning_rate: float = 1e-3
-    kwargs: dict = field(default_factory=dict, hash=False)
-    decay_type: str | None = None
-    lr_kwargs: dict = field(default_factory=dict, hash=False)
-    weight_decay: float = 0.0
-    gradient_clip: float | None = None
-    multi_step: int | None = None
+    opt_name: str = "adam"  # The name of the optimizer.
+    learning_rate: float = 1e-3  # The base learning rate.
+    kwargs: dict = field(default_factory=dict, hash=False)  # Additional keyword arguments for the optimizer.
+    decay_type: str | None = None  # Learning rate decay type.
+    lr_kwargs: dict = field(default_factory=dict, hash=False)  # Additional kwargs for the learning rate decay.
+    weight_decay: float = 0.0  # Weight decay.
+    gradient_clip: float | None = None  # Gradient clipping.
+    multi_step: int | None = None  # Number of steps to accumulate.
 
 
 def make_optimizer(config=OptimizerConfig(), direction="min") -> optax.GradientTransformation:
@@ -107,7 +96,9 @@ def make_optimizer(config=OptimizerConfig(), direction="min") -> optax.GradientT
                 Defaults to 1.0.
 
         """
-        learning_rate = optax.cosine_decay_schedule(learning_rate, decay_steps=config.lr_kwargs["decay_steps"], alpha=config.lr_kwargs.get("alpha", 0))
+        learning_rate = optax.cosine_decay_schedule(
+            learning_rate, decay_steps=config.lr_kwargs["decay_steps"], alpha=config.lr_kwargs.get("alpha", 0)
+        )
     elif config.decay_type == "exponential":
         """Args:
             init_value: the initial learning rate.

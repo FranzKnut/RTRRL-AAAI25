@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Lemmel"
+  given-names: "Julian"
+  orcid: "https://orcid.org/0000-0002-3517-2860"
+- family-names: "Grosu"
+  given-names: "Radu"
+title: "Real-Time Recurrent Reinforcement Learning"
+version: 1.0.0
+doi: 10.48550/arXiv.2311.04830
+date-released: 2025-02-13
+url: "https://github.com/FranzKnut/RTRRL-AAAI25"
