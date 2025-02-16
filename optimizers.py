@@ -77,13 +77,13 @@ def make_optimizer(config=OptimizerConfig(), direction="min") -> optax.GradientT
                 Defaults to 1.0.
         """
         learning_rate = optax.warmup_cosine_decay_schedule(
-            learning_rate * config.lr_kwargs["initial_multiplier"],
+            learning_rate * config.lr_kwargs.get("initial_multiplier", 0.0),
             peak_value=learning_rate,
-            end_value=learning_rate * config.lr_kwargs["end_multiplier"],
-            decay_steps=config.lr_kwargs["decay_steps"],
-            warmup_steps=config.lr_kwargs["warmup_steps"],
+            end_value=learning_rate * config.lr_kwargs.get("end_multiplier", 0.01),
+            decay_steps=config.lr_kwargs.get("decay_steps", 1e6),
+            warmup_steps=config.lr_kwargs.get("warmup_steps", 1e4),
         )
-    if config.decay_type == "cosine":
+    elif config.decay_type == "cosine":
         """Args:
             init_value: An initial value for the learning rate.
             decay_steps: Positive integer - the number of steps for which to apply
@@ -97,7 +97,9 @@ def make_optimizer(config=OptimizerConfig(), direction="min") -> optax.GradientT
 
         """
         learning_rate = optax.cosine_decay_schedule(
-            learning_rate, decay_steps=config.lr_kwargs["decay_steps"], alpha=config.lr_kwargs.get("alpha", 0)
+            learning_rate,
+            decay_steps=config.lr_kwargs.get("decay_steps", 1e6),
+            alpha=config.lr_kwargs.get("alpha", learning_rate * 0.01),
         )
     elif config.decay_type == "exponential":
         """Args:
@@ -138,3 +140,17 @@ def make_optimizer(config=OptimizerConfig(), direction="min") -> optax.GradientT
         return optimizer
 
     return _make_opt(learning_rate=learning_rate)
+
+
+def get_current_lrs(opt_state, opt_config: OptimizerConfig | None = None):
+    """Get current learning rate from optimizer state."""
+    lrs = {}
+    _reduce_on_plateau = False if opt_config is None else opt_config.reduce_on_plateau
+    if hasattr(opt_state, "inner_states"):
+        for k, s in opt_state.inner_states.items():
+            reduce_on_plateau_lr = s[0][3][3].scale if _reduce_on_plateau else 1
+            lrs["lr_" + k] = s[0][1]["learning_rate"] * reduce_on_plateau_lr
+    else:
+        reduce_on_plateau_lr = opt_state[3][3].scale if _reduce_on_plateau else 1
+        lrs["learning_rate"] = opt_state[1]["learning_rate"] * reduce_on_plateau_lr
+    return lrs

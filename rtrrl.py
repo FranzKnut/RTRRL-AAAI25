@@ -18,13 +18,14 @@ from flax import linen as nn
 import optax
 from brax.training.acme import running_statistics
 
+from envs.wrappers import VmapWrapper
 from logging_util import DummyLogger, log_norms, with_logger
 from envs.environments import EnvironmentParams, make_env, print_env_info, render_frames
 from models.ctrnn import OnlineCTRNNCell
 from models.online_lru import OnlineLRULayer
 from traces import compute_updates, init_trace, trace_update
 from models.neural_networks import FADense, MLP
-from optimizers import OptimizerConfig, make_optimizer
+from optimizers import OptimizerConfig, get_current_lrs, make_optimizer
 from models.jax_util import sigmoid_between, zeros_like_tree
 
 # jax.config.update('jax_debug_nans', True)
@@ -46,12 +47,13 @@ class RTRRLParams:
 
     # Training
     episodes: int = 150_000
-    steps: int = 10_000
+    steps: int = 1000
     patience: int = 20
 
     # Validation
     eval_every: int = 100
-    eval_steps: int = 10000
+    eval_steps: int = 1000
+    eval_batch_size: int = 10
     render_every_evals: int = 10
     render_start: int = 0
     render_steps: int = 200
@@ -75,11 +77,11 @@ class RTRRLParams:
     # Optimizer
     optimizer_params_td: OptimizerConfig = OptimizerConfig(
         opt_name="adam",
-        learning_rate=1e-5,
+        learning_rate=1e-3,
     )
     optimizer_params_rnn: OptimizerConfig = OptimizerConfig(
         opt_name="adam",
-        learning_rate=1e-5,
+        learning_rate=1e-3,
     )
 
     # RNN
@@ -89,31 +91,30 @@ class RTRRLParams:
     wiring: str = "fully_connected"
 
     # TD(lambda)
-    trace_mode: str = "dutch"
+    trace_mode: str = "accumulate"
     gamma: float = 0.99
-    lambda_v: float = 0.99
-    lambda_pi: float = 0.99
-    lambda_rnn: float = 0.99
+    lambda_v: float = 0.9
+    lambda_pi: float = 0.9
+    lambda_rnn: float = 0.9
     eta_pi: float = 1
     eta_f: float = 1
-    entropy_rate: float = 1e-5
+    entropy_rate: float = 0
     eta: float | None = 0
 
     # Features
+    meta_rl: bool = True
+    f_align: bool = True
+    normalize_reward: bool = True
+    normalize_obs: bool = False
+
+    layer_norm: bool = False
     var_scaling: bool = False
-    f_align: bool = False
     mlp_actor: bool = False
     pass_obs: bool = False
     update_period: float = 1
     dropout_rate: float = 0
-    meta_rl: bool = True
-    normalize_obs: bool = False
-    normalize_reward: bool = True
     act_magnitude_factor: float = 0
-    # normalize_obs: bool = False
     slow_rnn_factor: float = 0e-2
-    layer_norm: bool = False
-    lambda_scale: float = 0
 
 
 class TD(nn.Module):
@@ -162,7 +163,7 @@ class RNNActorCritic(nn.RNNCellBase):
     rnn_model: str | None = "ctrnn"
     gradient_mode: str = "rflo"
     f_align: bool = True
-    act_log_bounds: tuple[float] = field(default_factory=lambda: [0.001, 2])
+    act_log_bounds: tuple[float] = field(default_factory=lambda: [-2, 2])
     act_bounds: tuple[float] | None = None
     dropout_rate: float = 0.0
     pass_obs: bool = True
@@ -238,21 +239,18 @@ class RNNActorCritic(nn.RNNCellBase):
         """Compute value from latent."""
         if self.pass_obs:
             hidden = jnp.concatenate([hidden, x], axis=-1)
-        else:
-            return self.td.critic(hidden)
+        return self.td.critic(hidden)
 
     def action_dist(self, hidden, x=None):
         """Compute action distribution form latent."""
         if self.pass_obs:
             hidden = jnp.concatenate([hidden, x], axis=-1)
         if not self.discrete:
-            loc, scale = jnp.split(self.td.actor(hidden), 2, axis=-1)
-            scale = sigmoid_between(scale, *self.act_log_bounds)
-            # scale = jnp.exp(scale) + self.act_log_bounds[0]
-            # scale = jax.nn.softplus(scale) + self.act_log_bounds[0]
+            loc, log_scale = jnp.split(self.td.actor(hidden), 2, axis=-1)
+            log_scale = sigmoid_between(log_scale, *self.act_log_bounds)
             if self.act_bounds is not None:
                 loc = sigmoid_between(loc, *self.act_bounds)
-            dist = distrax.Normal(loc=loc, scale=scale)
+            dist = distrax.Normal(loc=loc, scale=jax.nn.softplus(log_scale))
         else:
             logits = self.td.actor(hidden)
             dist = distrax.Categorical(logits=logits)
@@ -268,7 +266,7 @@ class RNNActorCritic(nn.RNNCellBase):
         actor = self.action_dist(hidden, x)
 
         if key is not None:
-            actor = actor.sample(seed=key).reshape(self.batch_shape + (-1,))
+            actor = actor.sample(seed=key).squeeze()
 
         # Critic
         v_hat = self.value(hidden, x)
@@ -299,6 +297,7 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
     """
     logger = logger
     env, env_info, eval_env = make_env(args.env_params, make_eval=True)
+    eval_env = VmapWrapper(eval_env, batch_size=args.eval_batch_size)
     pprint(args, width=1)
     print_env_info(env_info)
 
@@ -435,9 +434,7 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
                 f_input = jnp.concatenate([f_input, re_action, r], axis=-1)
 
             step_key = jrandom.split(step_key, args.eval_batch_size)
-            rnn_state, (action, *_) = jax.vmap(partial(model.apply, _params))(
-                rnn_state, f_input, rngs={"sampling": step_key}
-            )
+            rnn_state, (action, *_) = jax.vmap(partial(model.apply, _params))(rnn_state, f_input, key=step_key)
             # action = action.mean(axis=-1)
             if DISCRETE:
                 # action = action.mean(axis=0)
@@ -693,10 +690,7 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
                     z_next["rnn"] = _grads_next["params"]["rnn"]
             return z_next
 
-        scaling_exponent = jnp.abs(d) ** 2
-        lambda_scale = jnp.exp(-scaling_exponent * args.lambda_scale)
-        loss_info["lambda_scale"] = lambda_scale.mean()
-        z = jax.vmap(trace_updates)(grads_next, z, _I, lambda_scale)
+        z = jax.vmap(trace_updates)(grads_next, z, _I)
 
         _carry = (
             params,
@@ -788,9 +782,14 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
                     "mean_delta": avg_d,
                     "mean_r_bar": avg_r_bar,
                     "mean_v": avg_val,
-                    # "current_lr": opt_state[1]['learning_rate']  # TODO: find a more elegant way to get this
-                    **jax.tree.map(lambda x: jnp.mean(x), loss_info),
+                    **jax.tree.map(jnp.mean, loss_info),
                 }
+                current_lrs = get_current_lrs(opt_state)
+                if args.optimizer_params_td.decay_type:
+                    metrics["lr/td"] = current_lrs["lr_td"]
+                if args.optimizer_params_rnn.decay_type:
+                    metrics["lr/rnn"] = current_lrs["lr_rnn"]
+
             else:
                 metrics = {}
 
