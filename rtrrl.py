@@ -16,6 +16,7 @@ import jax.numpy as jnp
 from jax import random as jrandom
 from flax import linen as nn
 import optax
+from brax.training.acme import running_statistics
 
 from logging_util import DummyLogger, log_norms, with_logger
 from envs.environments import EnvironmentParams, make_env, print_env_info, render_frames
@@ -106,6 +107,8 @@ class RTRRLParams:
     update_period: float = 1
     dropout_rate: float = 0
     meta_rl: bool = True
+    normalize_obs: bool = False
+    normalize_reward: bool = True
     act_magnitude_factor: float = 0
     # normalize_obs: bool = False
     slow_rnn_factor: float = 0e-2
@@ -326,9 +329,32 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
     )
     initial_input = env_state.obs
     batch_shape = initial_input.shape[:-1]
+
+    # Set up normalization
+    obs_rms = reward_rms = None
+
+    def normalize(obs, rms=None):
+        if rms is None:
+            return obs
+        else:
+            return running_statistics.normalize(obs, rms)
+
+    if args.normalize_obs:
+        obs_rms = running_statistics.init_state(env_state.obs[0])
+        obs_rms = running_statistics.update(obs_rms, env_state.obs)
+    if args.normalize_reward:
+        reward_rms = running_statistics.init_state(env_state.reward[0])
+        reward_rms = running_statistics.update(reward_rms, env_state.reward)
+
+    initial_input = normalize(env_state.obs, obs_rms)
+
     if args.meta_rl:
         initial_input = jnp.concatenate(
-            [initial_input, jnp.zeros(batch_shape + (env.action_size,)), env_state.reward.reshape(batch_shape + (1,))],
+            [
+                initial_input,
+                jnp.zeros(batch_shape + (env.action_size,)),
+                normalize(env_state.reward, reward_rms).reshape(batch_shape + (-1,)),
+            ],
             axis=-1,
         )
 
@@ -373,48 +399,71 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
         "render_every_evals and eval_every must be > 0 if render is True"
     )
 
-    def eval_step(_params, carry, _=None):
-        """Step function for scan."""
-        print("Tracing Eval Step")
-        # Unpack carry
-        env_state, rnn_state, re_action, _key = carry
-        _key, step_key = jrandom.split(_key)
-        f_input = env_state.obs.flatten()
-
-        if args.meta_rl:
-            r = env_state.reward.reshape(-1)
-            f_input = jnp.concatenate([f_input, re_action, r], axis=-1)
-
-        rnn_state, (action, *_) = model.apply(_params, rnn_state, f_input, key=step_key)
-        if DISCRETE:
-            action = action.squeeze()
-
-        # Step environment
-        env_state = eval_env.step(env_state, action)
-        # Assemble next input for the filter
-        re_action = jax.nn.one_hot(action, env.action_size) if DISCRETE else action
-        carry = env_state, rnn_state, re_action, _key
-        return carry, env_state
-
     @jax.jit
-    def eval_model(_params, key):
-        """Evaluate given actor in given environment."""
+    def eval_model(_params, key, _obs_rms=None, _reward_rms=None):
+        """Evaluate given agent in given environment."""
         if key is None:
             key = jrandom.PRNGKey(0)
         key, key_init = jrandom.split(key)
         env_state = eval_env.reset(key_init)
-
+        # Normalization
+        _input = normalize(env_state.obs, _obs_rms).reshape(args.eval_batch_size, -1)
+        if args.meta_rl:
+            _input = jnp.concatenate(
+                [
+                    _input,
+                    jnp.zeros((_input.shape[0], ACT_SIZE)),
+                    normalize(env_state.reward, _reward_rms).reshape(args.eval_batch_size, -1),
+                ],
+                axis=-1,
+            )
         # Initialize RNN states
-        rnn_state = model.initialize_carry(key_init, initial_input.shape[-1:])
+        rnn_state = model.initialize_carry(key_init, _input.shape)
         # Initialize input for the filter
+
+        def eval_step(_params, carry, _=None):
+            """Step function for scan."""
+            print("Tracing Eval Step")
+            # Unpack carry
+            env_state, rnn_state, re_action, _key = carry
+            _key, step_key = jrandom.split(_key)
+            f_input = normalize(env_state.obs, _obs_rms).reshape(args.eval_batch_size, -1)
+            # obs = normalization(state.obs) if normalization is not None else state.obs
+
+            if args.meta_rl:
+                r = normalize(env_state.reward, _reward_rms).reshape(args.eval_batch_size, -1)
+                f_input = jnp.concatenate([f_input, re_action, r], axis=-1)
+
+            step_key = jrandom.split(step_key, args.eval_batch_size)
+            rnn_state, (action, *_) = jax.vmap(partial(model.apply, _params))(
+                rnn_state, f_input, rngs={"sampling": step_key}
+            )
+            # action = action.mean(axis=-1)
+            if DISCRETE:
+                # action = action.mean(axis=0)
+                action = action.squeeze().astype(jnp.int32)
+            else:
+                action = action.reshape((args.eval_batch_size, -1))
+            # Step environments
+            env_state = eval_env.step(env_state, action)
+            # Assemble next input for the filter
+            re_action = jax.nn.one_hot(action, eval_env.action_size) if DISCRETE else action
+            carry = env_state, rnn_state, re_action, _key
+            return carry, env_state
 
         # Scan over the number of steps
         _, (env_states) = jax.lax.scan(
-            partial(eval_step, _params), (env_state, rnn_state, jnp.zeros(ACT_SIZE), key), length=args.eval_steps
+            partial(eval_step, _params),
+            (env_state, rnn_state, jnp.zeros((args.eval_batch_size, ACT_SIZE)), key),
+            length=args.eval_steps,
         )
 
-        total_reward = jnp.sum(env_states.reward) / jnp.max(jnp.array([jnp.sum(env_states.done), 1]))
-        return jnp.mean(total_reward), env_states
+        # total_reward = jnp.sum(env_states.reward) / jnp.max(jnp.array([jnp.sum(env_states.done), 1])).mean()
+        # For episodes that are done early, get the first occurence of done
+        ep_until = jnp.where(env_states.done.any(axis=0), env_states.done.argmax(axis=0), env_states.done.shape[0])
+        # Compute cumsum and get value corresponding to end of episode per batch.
+        ep_rewards = env_states.reward.cumsum(axis=0)[ep_until, jnp.arange(ep_until.shape[-1])].mean()
+        return ep_rewards, env_states
 
     # Set up scan body
     @jax.jit
@@ -431,6 +480,8 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
             v_prev,
             r_bar,
             _I,
+            _obs_rms,
+            _reward_rms,
             seed,
         ) = _carry
         seed, action_key, dropout_key = jrandom.split(seed, 3)
@@ -440,6 +491,10 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
         if DISCRETE:
             action = action.reshape(batch_shape)
         env_state = env.step(env_state, action)
+        if args.normalize_obs:
+            _obs_rms = running_statistics.update(_obs_rms, env_state.obs)
+        if args.normalize_reward:
+            _reward_rms = running_statistics.update(_reward_rms, env_state.reward)
         reward = env_state.reward.reshape(-1)
 
         # Reset cell state and trace if done
@@ -654,6 +709,8 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
             v_hat,
             r_bar,
             _I,
+            _obs_rms,
+            _reward_rms,
             seed,
         )
         return _carry, (env_state.reward, env_state.done, loss_info, v_hat, d)
@@ -669,6 +726,8 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
         v_prev,
         r_bar,
         initial_I,
+        obs_rms,
+        reward_rms,
         key_step,
     )
 
@@ -705,6 +764,8 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
                 v_hat,
                 r_bar,
                 initial_I,
+                obs_rms,
+                reward_rms,
                 seed,
             ) = carry
 
@@ -747,7 +808,7 @@ def train_rtrrl(args: RTRRLParams, logger=DummyLogger()):
             if args.eval_every and (i % args.eval_every == 0 or i == args.episodes - 1):  # also eval last
                 key_eval, _key = jrandom.split(key_eval)
                 # Do not render the first episode, render the last one
-                eval_avg, env_states = eval_model(slow_params, key=_key)
+                eval_avg, env_states = eval_model(slow_params, key=_key, _obs_rms=obs_rms, _reward_rms=reward_rms)
                 metrics["eval/rewards"] = float(eval_avg)
                 pbar.write(f"Eval reward: {eval_avg:.2f}")
 
