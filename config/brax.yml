@@ -1,15 +1,23 @@
+logging: aim
 env_params:
-  env_name: "brax-ant"
-  batch_size: 128
+  env_name: "brax-halfcheetah"
+  batch_size: 64
+  init_kwargs:
+    backend: "spring"
 trace_mode: "accumulate"
 gamma: 0.99
-lambda_v: 0.9
-lambda_pi: 0.9
-lambda_rnn: 0.9
-eta_pi: 1e-1
-eta_f: 1
-steps: 10
+lambda_v: 0.99
+lambda_pi: 0.99
+lambda_rnn: 0.99
+# eta_pi: "1e-3"
+# eta_f: "1e-2"
+entropy_rate: 1e-5
+steps: 1000
+eval_every: 100
+pass_obs: false
 optimizer_params_td:
-  learning_rate: 1e-3
+  # decay_type: cosine
+  learning_rate: "1e-3"
 optimizer_params_rnn:
-  learning_rate: 1e-4
+  # decay_type: cosine
+  learning_rate: "1e-3"

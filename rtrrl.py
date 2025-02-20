@@ -62,7 +62,7 @@ class RTRRLParams:
     logging: str | None = None
     log_repo: str | None = None
     save_model: bool = False
-    log_norms: bool = True
+    log_norms: bool = False
     log_code: bool = False
     log_every: int = 1
 
@@ -93,12 +93,12 @@ class RTRRLParams:
     # TD(lambda)
     trace_mode: str = "accumulate"
     gamma: float = 0.99
-    lambda_v: float = 0.9
-    lambda_pi: float = 0.9
-    lambda_rnn: float = 0.9
+    lambda_v: float = 0.99
+    lambda_pi: float = 0.99
+    lambda_rnn: float = 0.99
     eta_pi: float = 1
     eta_f: float = 1
-    entropy_rate: float = 0
+    entropy_rate: float = 1e-5
     eta: float | None = 0
 
     # Features
@@ -106,9 +106,9 @@ class RTRRLParams:
     f_align: bool = True
     normalize_reward: bool = True
     normalize_obs: bool = False
-
+    
+    var_scaling: bool = True
     layer_norm: bool = False
-    var_scaling: bool = False
     mlp_actor: bool = False
     pass_obs: bool = False
     update_period: float = 1
